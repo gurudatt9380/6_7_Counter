@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>6-7 Pose Challenge</title>
+
+  <!-- MediaPipe Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background-color: rgb(15, 16, 20);
+      color: #f5f7fa;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #app {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    video {
+      display: none;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Top Translucent HUD Header */
+    .hud-header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 112px;
+      background: rgba(15, 16, 20, 0.82);
+      border-bottom: 1px solid rgb(55, 58, 68);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 42px;
+      z-index: 10;
+    }
+
+    .logo-container {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .logo-title {
+      font-size: 38px;
+      font-weight: 800;
+      color: rgb(255, 149, 10); /* BLUE in BGR -> Orange/Blue */
+      line-height: 1;
+    }
+
+    .logo-sub {
+      font-size: 13px;
+      color: rgb(165, 170, 180);
+      letter-spacing: 1px;
+      margin-top: 4px;
+    }
+
+    .score-container {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+    }
+
+    .score-value {
+      font-size: 52px;
+      font-weight: 800;
+      color: rgb(245, 247, 250);
+      line-height: 1;
+    }
+
+    .score-label {
+      font-size: 12px;
+      color: rgb(165, 170, 180);
+      letter-spacing: 1px;
+      margin-top: 2px;
+    }
+
+    .timer-card {
+      background: rgba(32, 34, 42, 0.95);
+      border-radius: 14px;
+      padding: 12px 28px;
+      text-align: center;
+      min-width: 155px;
+    }
+
+    .timer-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: rgb(245, 247, 250);
+      font-family: monospace;
+    }
+
+    .timer-label {
+      font-size: 10px;
+      color: rgb(165, 170, 180);
+      letter-spacing: 1px;
+    }
+
+    /* Status Pill */
+    .status-pill {
+      position: absolute;
+      bottom: 105px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 16, 20, 0.88);
+      padding: 12px 32px;
+      border-radius: 22px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      z-index: 10;
+      white-space: nowrap;
+      text-align: center;
+    }
+
+    /* Bottom Control Bar */
+    .bottom-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 45px;
+      background: rgba(15, 16, 20, 0.85);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .controls-text {
+      font-size: 13px;
+      color: rgb(165, 170, 180);
+      letter-spacing: 1px;
+    }
+
+    /* Mobile Quick Tap Area */
+    .mobile-controls {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 5;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="app">
+    <video id="webcam" playsinline></video>
+    <canvas id="output_canvas"></canvas>
+
+    <!-- Top HUD Header -->
+    <div class="hud-header">
+      <div class="logo-container">
+        <span class="logo-title">6—7</span>
+        <span class="logo-sub">POSE CHALLENGE</span>
+      </div>
+
+      <div class="score-container">
+        <div id="score" class="score-value">0</div>
+        <div class="score-label">REPETITIONS</div>
+      </div>
+
+      <div class="timer-card">
+        <div id="timer" class="timer-value">60.0</div>
+        <div class="timer-label">SECONDS</div>
+      </div>
+    </div>
+
+    <!-- Status Pill -->
+    <div id="status_pill" class="status-pill" style="color: rgb(165, 170, 180);">PAUSED</div>
+
+    <!-- Bottom Control Bar -->
+    <div class="bottom-bar">
+      <div class="controls-text">SPACE / TAP: START / PAUSE &nbsp;&nbsp;&nbsp;&nbsp; R: RESET</div>
+    </div>
+
+    <div id="touch_layer" class="mobile-controls"></div>
+  </div>
+
+  <script>
+    // ================================================================
+    // CONFIG MATCHING YOUR PYTHON SCRIPT EXACTLY
+    // ================================================================
+    const ROUND_SECONDS = 60.0;
+    const RAISE_THRESHOLD = 0.045;
+    const DEBOUNCE_TIME = 0.08; // seconds
+    const VISIBILITY_MIN = 0.35;
+    const FLIP_CAMERA = true;
+
+    // Game Variables
+    let count = 0;
+    let state = null;
+    let lastRepTime = 0;
+    let running = false;
+    let startTime = null;
+    let elapsedFrozen = 0.0;
+    let timeUp = false;
+
+    // DOM Elements
+    const videoElement = document.getElementById('webcam');
+    const canvasElement = document.getElementById('output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const timerEl = document.getElementById('timer');
+    const statusPill = document.getElementById('status_pill');
+    const touchLayer = document.getElementById('touch_layer');
+
+    // ================================================================
+    // MEDIAPIPE POSE SETUP
+    // ================================================================
+    const pose = new Pose({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+    });
+
+    pose.setOptions({
+      modelComplexity: 0,
+      smoothLandmarks: false,
+      minDetectionConfidence: 0.4,
+      minTrackingConfidence: 0.3
+    });
+
+    pose.onResults(onResults);
+
+    function onResults(results) {
+      // Widescreen 16:9 canvas sizing
+      canvasElement.width = videoElement.videoWidth || 1280;
+      canvasElement.height = videoElement.videoHeight || 720;
+
+      const w = canvasElement.width;
+      const h = canvasElement.height;
+
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, w, h);
+
+      // Mirror display if FLIP_CAMERA is enabled
+      if (FLIP_CAMERA) {
+        canvasCtx.translate(w, 0);
+        canvasCtx.scale(-1, 1);
+      }
+
+      canvasCtx.drawImage(results.image, 0, 0, w, h);
+
+      let detected = false;
+      let rightDiff = 0.0;
+      let leftDiff = 0.0;
+
+      if (results.poseLandmarks) {
+        const lm = results.poseLandmarks;
+
+        // Landmarks 16: R_WRIST, 14: R_ELBOW, 15: L_WRIST, 13: L_ELBOW
+        const rw = lm[16], re = lm[14], lw = lm[15], le = lm[13];
+
+        if (rw && re && lw && le) {
+          if (
+            rw.visibility > VISIBILITY_MIN &&
+            re.visibility > VISIBILITY_MIN &&
+            lw.visibility > VISIBILITY_MIN &&
+            le.visibility > VISIBILITY_MIN
+          ) {
+            detected = true;
+            rightDiff = re.y - rw.y;
+            leftDiff = le.y - lw.y;
+          }
+        }
+
+        // Render skeleton skeleton overlay
+        drawSkeleton(canvasCtx, lm, w, h);
+      }
+
+      canvasCtx.restore();
+
+      // ================================================================
+      // COUNTING LOGIC (Matching Python)
+      // ================================================================
+      const now = Date.now() / 1000;
+
+      if (running && detected && !timeUp) {
+        const combined = rightDiff - leftDiff;
+
+        if (state === null) {
+          if (Math.abs(combined) >= RAISE_THRESHOLD) {
+            state = combined > 0 ? "right_up" : "left_up";
+          }
+        } else {
+          const flipped = (state === "right_up" && combined <= -RAISE_THRESHOLD) ||
+                          (state === "left_up" && combined >= RAISE_THRESHOLD);
+
+          if (flipped) {
+            if (now - lastRepTime >= DEBOUNCE_TIME) {
+              count += 1;
+              scoreEl.innerText = count;
+              lastRepTime = now;
+            }
+            state = state === "right_up" ? "left_up" : "right_up";
+          }
+        }
+      }
+
+      // ================================================================
+      // TIMER LOGIC
+      // ================================================================
+      let elapsed = elapsedFrozen;
+      if (running && !timeUp) {
+        elapsed = elapsedFrozen + (now - startTime);
+        if (elapsed >= ROUND_SECONDS) {
+          elapsed = ROUND_SECONDS;
+          running = false;
+          timeUp = true;
+        }
+      }
+
+      const remaining = Math.max(0.0, ROUND_SECONDS - elapsed);
+      timerEl.innerText = remaining.toFixed(1);
+
+      if (remaining <= 10 && running) {
+        timerEl.style.color = "rgb(235, 70, 70)"; // RED
+      } else {
+        timerEl.style.color = "rgb(245, 247, 250)"; // WHITE
+      }
+
+      // ================================================================
+      // STATUS UPDATE
+      // ================================================================
+      if (timeUp) {
+        statusPill.innerText = "TIME'S UP";
+        statusPill.style.color = "rgb(235, 70, 70)";
+      } else if (running && !detected) {
+        statusPill.innerText = "SHOW BOTH ARMS";
+        statusPill.style.color = "rgb(245, 247, 250)";
+      } else if (running) {
+        statusPill.innerText = "●  RUNNING";
+        statusPill.style.color = "rgb(90, 210, 90)";
+      } else {
+        statusPill.innerText = "PAUSED";
+        statusPill.style.color = "rgb(165, 170, 180)";
+      }
+    }
+
+    // Skeleton drawing logic
+    function drawSkeleton(ctx, landmarks, w, h) {
+      const connections = [
+        [11, 12], [11, 13], [13, 15], [12, 14], [14, 16],
+        [11, 23], [12, 24], [23, 24]
+      ];
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgb(10, 149, 255)"; // BLUE
+
+      connections.forEach(([i, j]) => {
+        if (landmarks[i] && landmarks[j] && landmarks[i].visibility > VISIBILITY_MIN && landmarks[j].visibility > VISIBILITY_MIN) {
+          ctx.beginPath();
+          ctx.moveTo(landmarks[i].x * w, landmarks[i].y * h);
+          ctx.lineTo(landmarks[j].x * w, landmarks[j].y * h);
+          ctx.stroke();
+        }
+      });
+    }
+
+    // ================================================================
+    // CAMERA INIT
+    // ================================================================
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await pose.send({ image: videoElement });
+      },
+      width: 1280,
+      height: 720
+    });
+    camera.start();
+
+    // ================================================================
+    // CONTROLS (SPACE, R)
+    // ================================================================
+    function toggleStart() {
+      const now = Date.now() / 1000;
+      if (!timeUp) {
+        if (running) {
+          elapsedFrozen += (now - startTime);
+          running = false;
+        } else {
+          startTime = now;
+          running = true;
+        }
+      }
+    }
+
+    function resetGame() {
+      running = false;
+      startTime = null;
+      elapsedFrozen = 0.0;
+      count = 0;
+      state = null;
+      timeUp = false;
+      scoreEl.innerText = "0";
+      timerEl.innerText = "60.0";
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        toggleStart();
+      }
+      if (e.code === 'KeyR' || e.code === 'Keyr') {
+        resetGame();
+      }
+    });
+
+    touchLayer.addEventListener('click', toggleStart);
+  </script>
+</body>
+</html>
